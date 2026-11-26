@@ -189,17 +189,17 @@ begin
     return;
   end if;
 
-  -- Échappe les jokers LIKE (\, %, _) pour empêcher le scraping par motif
-  v_escaped := replace(replace(replace(v_clean, '\', '\\'), '%', '\%'), '_', '\_');
+  -- Échappe les jokers LIKE (!, %, _) pour empêcher le scraping par motif
+  v_escaped := replace(replace(replace(v_clean, '!', '!!'), '%', '!%'), '_', '!_');
 
   return query
   select p.id, p.username
   from public.profiles p
   where p.id <> v_uid
-    and p.username ilike '%' || v_escaped || '%' escape '\'
+    and p.username ilike '%' || v_escaped || '%' escape '!'
   order by
     (lower(p.username) = lower(v_clean)) desc,
-    (lower(p.username) like lower(v_escaped) || '%' escape '\') desc,
+    (lower(p.username) like lower(v_escaped) || '%' escape '!') desc,
     p.username asc
   limit 10;
 end;
@@ -379,3 +379,6 @@ begin
     alter publication supabase_realtime add table public.conversations;
   end if;
 end $$;
+
+-- Force PostgREST à recharger immédiatement le cache des tables et fonctions RPC
+notify pgrst, 'reload schema';

@@ -113,7 +113,9 @@ export function Sidebar({
             className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-400"
           />
           <input
-            type="search"
+            type="text"
+            inputMode="search"
+            enterKeyHint="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             maxLength={20}

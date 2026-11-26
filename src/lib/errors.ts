@@ -49,21 +49,37 @@ export function translateAuthError(error: ErrorLike | null | undefined): string 
 export function translateDbError(error: ErrorLike | null | undefined): string {
   if (!error) return "Une erreur inconnue est survenue.";
   const msg = (error.message ?? "").toLowerCase();
+  const code = (error.code ?? "").toUpperCase();
 
-  if (error.code === "23505" || msg.includes("duplicate key")) {
+  if (
+    code === "PGRST202" ||
+    code === "PGRST205" ||
+    code === "42883" ||
+    code === "42P01" ||
+    msg.includes("could not find the function") ||
+    msg.includes("schema cache")
+  ) {
+    return "Base de données non à jour : exécutez supabase/schema.sql dans votre SQL Editor Supabase.";
+  }
+  if (code === "PGRST301" || error.status === 401 || msg.includes("jwt expired")) {
+    return "Session expirée. Veuillez vous reconnecter.";
+  }
+  if (code === "23505" || msg.includes("duplicate key")) {
     return "Cette discussion existe déjà.";
   }
-  if (error.code === "42501" || msg.includes("row-level security")) {
+  if (code === "42501" || msg.includes("row-level security")) {
     return "Action non autorisée.";
   }
-  if (error.code === "22023") {
+  if (code === "22023") {
     return "Destinataire introuvable ou invalide.";
   }
-  if (error.code === "23514") {
+  if (code === "23514") {
     return "Contenu invalide (trop long ou vide).";
   }
   if (msg.includes("failed to fetch") || msg.includes("networkerror")) {
     return "Connexion impossible au serveur. Vérifiez votre connexion internet.";
   }
-  return "Une erreur est survenue. Veuillez réessayer.";
+  return code
+    ? `Une erreur est survenue (${code}). Veuillez réessayer.`
+    : "Une erreur est survenue. Veuillez réessayer.";
 }
