@@ -1,0 +1,2188 @@
+Directory structure:
+└── nannju8-rtchat/
+    ├── README.md
+    ├── index.html
+    ├── netlify.toml
+    ├── package.json
+    ├── tsconfig.json
+    ├── vite.config.ts
+    ├── .env.example
+    ├── src/
+    │   ├── App.tsx
+    │   ├── index.css
+    │   ├── main.tsx
+    │   ├── types.ts
+    │   ├── vite-env.d.ts
+    │   ├── components/
+    │   │   ├── AuthScreen.tsx
+    │   │   ├── Avatar.tsx
+    │   │   ├── ChatArea.tsx
+    │   │   ├── CreateGroupModal.tsx
+    │   │   ├── Icons.tsx
+    │   │   ├── MessageInput.tsx
+    │   │   ├── SetupScreen.tsx
+    │   │   └── Sidebar.tsx
+    │   ├── context/
+    │   │   └── AuthContext.tsx
+    │   ├── hooks/
+    │   │   ├── useGroups.ts
+    │   │   └── useMessages.ts
+    │   ├── lib/
+    │   │   ├── errors.ts
+    │   │   ├── format.ts
+    │   │   └── supabase.ts
+    │   └── utils/
+    │       └── cn.ts
+    └── supabase/
+        └── schema.sql
+
+================================================
+FILE: README.md
+================================================
+# 💬 Discussions de groupe en temps réel
+
+Application de messagerie de groupe : **React + Vite + Tailwind CSS** côté frontend (hébergé sur **Netlify**), **Supabase** pour tout le backend (Auth, PostgreSQL + RLS, Realtime). Aucun serveur personnalisé.
+
+Seuls les utilisateurs inscrits et connectés peuvent voir les groupes et les messages. Un visiteur non connecté ne voit que l'écran de connexion / inscription, et la base de données refuse de toute façon tout accès au rôle `anon` (Row Level Security).
+
+## Arborescence
+
+```
+.
+├── .env.example                  # Modèle des variables d'environnement
+├── .gitignore
+├── index.html
+├── netlify.toml                  # Build + routage SPA + en-têtes de sécurité
+├── package.json
+├── supabase/
+│   └── schema.sql                # Script SQL complet à exécuter dans Supabase
+└── src/
+    ├── main.tsx
+    ├── App.tsx                   # Garde d'accès : connecté → chat, sinon → connexion
+    ├── index.css
+    ├── types.ts
+    ├── vite-env.d.ts
+    ├── lib/
+    │   ├── supabase.ts           # Client Supabase (URL + clé anon uniquement)
+    │   ├── errors.ts             # Messages d'erreur en français
+    │   └── format.ts             # Dates, couleurs d'avatar
+    ├── context/
+    │   └── AuthContext.tsx       # Session, connexion, inscription, déconnexion
+    ├── hooks/
+    │   ├── useGroups.ts          # Liste + création de groupes (+ temps réel)
+    │   └── useMessages.ts        # Historique, temps réel INSERT/DELETE, envoi, suppression
+    └── components/
+        ├── AuthScreen.tsx        # Connexion / Inscription
+        ├── SetupScreen.tsx       # Aide si les variables d'environnement manquent
+        ├── Sidebar.tsx           # Liste des groupes, nouveau groupe, déconnexion
+        ├── CreateGroupModal.tsx
+        ├── ChatArea.tsx          # Messages, auto-scroll, suppression
+        ├── MessageInput.tsx      # Saisie (Entrée = envoyer, anti double envoi)
+        ├── Avatar.tsx
+        └── Icons.tsx
+```
+
+## 1. Configurer Supabase
+
+1. Créez un compte sur <https://supabase.com> puis cliquez sur **New project** (choisissez un nom, un mot de passe de base de données et une région proche de vos utilisateurs). Attendez la fin de l'initialisation.
+2. **Lancer le SQL** : menu de gauche **SQL Editor** → **New query** → copiez-collez tout le contenu de `supabase/schema.sql` → **Run**. Vous devez voir « Success. No rows returned ».
+   Le script crée les tables, le trigger de création de profil, les politiques RLS, active le Realtime et crée le groupe « Général ». Il peut être relancé sans danger.
+3. **Récupérer les clés** : **Project Settings** (engrenage) → **API** (ou **API Keys**) :
+   - **Project URL** → valeur de `VITE_SUPABASE_URL`
+   - clé **anon / public** → valeur de `VITE_SUPABASE_ANON_KEY`
+
+   ⚠️ N'utilisez **jamais** la clé `service_role` dans le frontend.
+4. **Confirmation par email** : **Authentication** → **Sign In / Providers** (ou **Providers → Email**) → option **Confirm email** :
+   - **Désactivée** : l'utilisateur est connecté immédiatement après l'inscription (pratique pour les tests).
+   - **Activée** : l'utilisateur reçoit un email et doit cliquer sur le lien avant de se connecter. L'application affiche alors « Vérifiez vos emails ».
+5. **URL du site** (important si la confirmation par email est activée) : **Authentication** → **URL Configuration** → renseignez **Site URL** avec l'adresse Netlify (ex. `https://mon-chat.netlify.app`) une fois le site déployé. Pour les tests locaux, ajoutez `http://localhost:5173` dans **Redirect URLs**.
+6. Vérification Realtime : **Database** → **Publications** → `supabase_realtime` doit contenir les tables `messages` et `groups`.
+
+## 2. Tester en local
+
+```bash
+npm install
+cp .env.example .env      # puis éditez .env avec vos deux valeurs
+npm run dev
+```
+
+Ouvrez <http://localhost:5173>. Pour tester le temps réel : ouvrez deux navigateurs (ou une fenêtre de navigation privée), créez deux comptes différents, puis écrivez dans « Général ».
+
+Build de production : `npm run build` (le résultat est dans `dist/`), aperçu : `npm run preview`.
+
+## 3. GitHub puis Netlify
+
+### Mettre le code sur GitHub
+
+```bash
+git init
+git add .
+git commit -m "Messagerie de groupe temps réel"
+git branch -M main
+git remote add origin https://github.com/VOTRE-UTILISATEUR/VOTRE-DEPOT.git
+git push -u origin main
+```
+
+Le fichier `.env` est dans `.gitignore` : vos variables ne sont pas publiées.
+
+### Déployer sur Netlify
+
+1. Sur <https://app.netlify.com> : **Add new site** → **Import an existing project** → **GitHub** → choisissez votre dépôt.
+2. Les réglages de build sont lus depuis `netlify.toml` (commande `npm run build`, dossier `dist`).
+3. Avant de déployer, ouvrez **Site configuration → Environment variables** (ou **Add environment variables** sur l'écran de création) et ajoutez :
+   - `VITE_SUPABASE_URL` = l'URL de votre projet Supabase
+   - `VITE_SUPABASE_ANON_KEY` = la clé anon
+4. Cliquez sur **Deploy**. Si vous ajoutez les variables après coup, relancez un déploiement (**Deploys → Trigger deploy → Clear cache and deploy site**), car Vite les intègre au moment du build.
+5. Copiez l'URL Netlify obtenue dans Supabase → **Authentication → URL Configuration → Site URL** (étape 1.5).
+
+## Sécurité — résumé
+
+- RLS activé (et forcé) sur `profiles`, `groups`, `messages`. Aucun privilège pour `anon` sur les tables.
+- Lecture réservée au rôle `authenticated` ; insertion de groupe seulement si `auth.uid() = created_by` ; insertion de message seulement si `auth.uid() = user_id` (pas d'usurpation) ; suppression de message seulement si `auth.uid() = user_id`.
+- Les messages sont affichés comme du texte par React (aucun `dangerouslySetInnerHTML`).
+- Seules l'URL du projet et la clé `anon` sont présentes dans le frontend.
+- La fonction `is_username_available` (appelable sans connexion) ne renvoie qu'un booléen pour signaler un pseudo déjà pris pendant l'inscription. Pour la supprimer : `drop function public.is_username_available(text);` — l'inscription continuera de fonctionner, l'unicité restant garantie par la base.
+
+## Notes techniques sur le temps réel
+
+- Les `INSERT` sont filtrés côté serveur par groupe (`group_id=eq.<id>`).
+- Les `DELETE` ne peuvent pas être filtrés par colonne dans Supabase Realtime (seule la clé primaire est transmise) : l'application retire donc simplement l'`id` reçu s'il est affiché.
+- Les doublons sont évités par l'`id` du message (l'expéditeur voit son message immédiatement, l'évènement temps réel est ignoré).
+- Chaque canal est supprimé (`removeChannel`) au changement de groupe, à la déconnexion et à la fermeture de la page. À la (re)connexion du canal, l'historique est rechargé pour rattraper les messages manqués.
+
+
+
+================================================
+FILE: index.html
+================================================
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Discussions de groupe en temps réel</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
+
+
+================================================
+FILE: netlify.toml
+================================================
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Routage SPA : toute URL renvoie vers index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+
+
+================================================
+FILE: package.json
+================================================
+{
+  "name": "react-vite-tailwind",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.109.0",
+    "clsx": "2.1.1",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "tailwind-merge": "3.4.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.1.17",
+    "@types/node": "22.19.17",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.1.1",
+    "tailwindcss": "4.1.17",
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "vite-plugin-singlefile": "2.3.0"
+  }
+}
+
+
+
+================================================
+FILE: tsconfig.json
+================================================
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "types": ["node"],
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    /* Path mapping */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src", "vite.config.ts"]
+}
+
+
+
+================================================
+FILE: vite.config.ts
+================================================
+import path from "path";
+import { fileURLToPath } from "url";
+import tailwindcss from "@tailwindcss/vite";
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
+import { viteSingleFile } from "vite-plugin-singlefile";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react(), tailwindcss(), viteSingleFile()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "src"),
+    },
+  },
+});
+
+
+
+================================================
+FILE: .env.example
+================================================
+# Copiez ce fichier en ".env" (ou ".env.local") et renseignez vos valeurs.
+# Ces deux valeurs sont PUBLIQUES (URL du projet + clé "anon").
+# N'utilisez JAMAIS la clé "service_role" dans le frontend.
+VITE_SUPABASE_URL=https://votre-projet.supabase.co
+VITE_SUPABASE_ANON_KEY=votre-cle-anon-publique
+
+
+
+================================================
+FILE: src/App.tsx
+================================================
+import { useCallback, useEffect, useState } from "react";
+import { AuthProvider, useAuth } from "./context/AuthContext";
+import { isSupabaseConfigured } from "./lib/supabase";
+import { useGroups } from "./hooks/useGroups";
+import { AuthScreen } from "./components/AuthScreen";
+import { ChatArea } from "./components/ChatArea";
+import { ChatIcon, Spinner } from "./components/Icons";
+import { SetupScreen } from "./components/SetupScreen";
+import { Sidebar } from "./components/Sidebar";
+
+function ChatLayout({ userId, username, onSignOut }: { userId: string; username: string; onSignOut: () => void }) {
+  const { groups, loading, error, createGroup } = useGroups(userId);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  // Sur mobile : true = liste des groupes, false = conversation
+  const [showList, setShowList] = useState(true);
+
+  // Sur ordinateur, ouvre automatiquement « Général » (ou le premier groupe)
+  useEffect(() => {
+    if (activeId || groups.length === 0) return;
+    if (window.matchMedia("(min-width: 768px)").matches) {
+      const general = groups.find((g) => g.name.toLowerCase() === "général") ?? groups[0];
+      setActiveId(general.id);
+      setShowList(false);
+    }
+  }, [groups, activeId]);
+
+  const handleSelect = useCallback((id: string) => {
+    setActiveId(id);
+    setShowList(false);
+  }, []);
+
+  const activeGroup = groups.find((g) => g.id === activeId) ?? null;
+
+  return (
+    <div className="flex h-dvh w-full overflow-hidden bg-white">
+      <Sidebar
+        className={`${showList ? "flex" : "hidden"} w-full md:flex md:w-80 md:shrink-0`}
+        groups={groups}
+        loading={loading}
+        error={error}
+        activeId={activeId}
+        username={username}
+        onSelect={handleSelect}
+        onCreate={createGroup}
+        onSignOut={onSignOut}
+      />
+
+      <main className={`${showList ? "hidden" : "flex"} min-w-0 flex-1 md:flex`}>
+        {activeGroup ? (
+          <ChatArea
+            key={activeGroup.id}
+            group={activeGroup}
+            me={{ id: userId, username }}
+            onBack={() => setShowList(true)}
+          />
+        ) : (
+          <div className="flex flex-1 flex-col items-center justify-center bg-slate-50 p-6 text-center text-slate-500">
+            <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-600">
+              <ChatIcon width={32} height={32} />
+            </div>
+            <p className="font-semibold text-slate-700">Sélectionnez un groupe</p>
+            <p className="text-sm">Choisissez une discussion dans la liste ou créez-en une nouvelle.</p>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function Root() {
+  const { session, user, username, loading, signOut } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-slate-50 text-slate-500">
+        <Spinner className="mr-2 h-6 w-6 text-indigo-500" />
+        Chargement…
+      </div>
+    );
+  }
+
+  // Aucun visiteur anonyme : seul l'écran de connexion / inscription est visible
+  if (!session || !user) return <AuthScreen />;
+
+  return <ChatLayout key={user.id} userId={user.id} username={username} onSignOut={signOut} />;
+}
+
+export default function App() {
+  if (!isSupabaseConfigured) return <SetupScreen />;
+  return (
+    <AuthProvider>
+      <Root />
+    </AuthProvider>
+  );
+}
+
+
+
+================================================
+FILE: src/index.css
+================================================
+@import "tailwindcss";
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+li.group {
+  animation: message-in 0.18s ease-out;
+}
+
+
+
+================================================
+FILE: src/main.tsx
+================================================
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import "./index.css";
+import App from "./App";
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
+);
+
+
+
+================================================
+FILE: src/types.ts
+================================================
+export interface Group {
+  id: string;
+  name: string;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface Message {
+  id: string;
+  group_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  username: string;
+}
+
+export interface RawMessage {
+  id: string;
+  group_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  profiles?: { username: string } | { username: string }[] | null;
+}
+
+
+
+================================================
+FILE: src/vite-env.d.ts
+================================================
+/// <reference types="vite/client" />
+
+interface ImportMetaEnv {
+  readonly VITE_SUPABASE_URL?: string;
+  readonly VITE_SUPABASE_ANON_KEY?: string;
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+}
+
+
+
+================================================
+FILE: src/components/AuthScreen.tsx
+================================================
+import { useState, type FormEvent } from "react";
+import { useAuth } from "../context/AuthContext";
+import { ChatIcon, Spinner } from "./Icons";
+
+type Mode = "login" | "signup";
+
+const inputClass =
+  "w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-900 placeholder-slate-400 outline-none transition focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 disabled:bg-slate-100";
+
+export function AuthScreen() {
+  const { signIn, signUp } = useAuth();
+  const [mode, setMode] = useState<Mode>("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+
+  const switchMode = (next: Mode) => {
+    setMode(next);
+    setError(null);
+    setInfo(null);
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (submitting) return;
+    setError(null);
+    setInfo(null);
+
+    if (mode === "signup") {
+      const name = username.trim();
+      if (name.length < 3 || name.length > 20) {
+        setError("Le pseudo doit contenir entre 3 et 20 caractères.");
+        return;
+      }
+      if (password.length < 6) {
+        setError("Mot de passe trop court : 6 caractères minimum.");
+        return;
+      }
+    }
+
+    setSubmitting(true);
+    try {
+      if (mode === "login") {
+        const res = await signIn(email, password);
+        if (res.error) setError(res.error);
+      } else {
+        const res = await signUp(email, password, username);
+        if (res.error) {
+          setError(res.error);
+        } else if (res.needsConfirmation) {
+          setInfo(
+            "Compte créé ! Vérifiez vos emails et cliquez sur le lien de confirmation, puis connectez-vous."
+          );
+          setMode("login");
+          setPassword("");
+        }
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="flex min-h-dvh items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-violet-100 p-4">
+      <div className="w-full max-w-md">
+        <div className="mb-6 flex flex-col items-center text-center">
+          <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-200">
+            <ChatIcon width={28} height={28} />
+          </div>
+          <h1 className="text-2xl font-bold text-slate-900">Discussions de groupe</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Connectez-vous pour rejoindre la conversation.
+          </p>
+        </div>
+
+        <div className="rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200 sm:p-8">
+          <div className="mb-6 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1" role="tablist">
+            {(["login", "signup"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="tab"
+                aria-selected={mode === m}
+                onClick={() => switchMode(m)}
+                className={`rounded-lg py-2 text-sm font-semibold transition ${
+                  mode === m ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                {m === "login" ? "Connexion" : "Inscription"}
+              </button>
+            ))}
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate={false}>
+            {mode === "signup" && (
+              <div>
+                <label htmlFor="username" className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Pseudo
+                </label>
+                <input
+                  id="username"
+                  type="text"
+                  required
+                  minLength={3}
+                  maxLength={20}
+                  autoComplete="username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  disabled={submitting}
+                  placeholder="Votre pseudo (unique)"
+                  className={inputClass}
+                />
+              </div>
+            )}
+
+            <div>
+              <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-slate-700">
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                required
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={submitting}
+                placeholder="vous@exemple.com"
+                className={inputClass}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-slate-700">
+                Mot de passe
+              </label>
+              <input
+                id="password"
+                type="password"
+                required
+                minLength={mode === "signup" ? 6 : undefined}
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={submitting}
+                placeholder={mode === "signup" ? "6 caractères minimum" : "Votre mot de passe"}
+                className={inputClass}
+              />
+            </div>
+
+            {error && (
+              <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {error}
+              </div>
+            )}
+            {info && (
+              <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                {info}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-3 text-base font-semibold text-white shadow-lg shadow-indigo-200 transition hover:from-indigo-500 hover:to-violet-500 focus:outline-none focus:ring-4 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {submitting && <Spinner />}
+              {submitting
+                ? mode === "login"
+                  ? "Connexion…"
+                  : "Création du compte…"
+                : mode === "login"
+                  ? "Se connecter"
+                  : "Créer mon compte"}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+================================================
+FILE: src/components/Avatar.tsx
+================================================
+import { avatarColor } from "../lib/format";
+
+interface AvatarProps {
+  name: string;
+  size?: "sm" | "md";
+}
+
+export function Avatar({ name, size = "md" }: AvatarProps) {
+  const initial = (name.trim().charAt(0) || "?").toUpperCase();
+  const dims = size === "sm" ? "h-8 w-8 text-xs" : "h-10 w-10 text-sm";
+  return (
+    <div
+      className={`${dims} ${avatarColor(name)} flex shrink-0 items-center justify-center rounded-full font-semibold text-white select-none`}
+      aria-hidden="true"
+    >
+      {initial}
+    </div>
+  );
+}
+
+
+
+================================================
+FILE: src/components/ChatArea.tsx
+================================================
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { Group } from "../types";
+import { useMessages } from "../hooks/useMessages";
+import { dayKey, formatDay, formatTime } from "../lib/format";
+import { Avatar } from "./Avatar";
+import { BackIcon, ChatIcon, HashIcon, Spinner, TrashIcon } from "./Icons";
+import { MessageInput } from "./MessageInput";
+
+interface Props {
+  group: Group;
+  me: { id: string; username: string };
+  onBack: () => void;
+}
+
+export function ChatArea({ group, me, onBack }: Props) {
+  const { messages, loading, error, connected, send, remove } = useMessages(group.id, me);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const lastGroupRef = useRef<string | null>(null);
+
+  // Auto-scroll : instantané à l'ouverture d'un groupe, fluide pour les nouveaux messages
+  useLayoutEffect(() => {
+    const groupChanged = lastGroupRef.current !== group.id;
+    if (loading && messages.length === 0) return;
+    bottomRef.current?.scrollIntoView({
+      behavior: groupChanged ? "auto" : "smooth",
+      block: "end",
+    });
+    if (!loading) lastGroupRef.current = group.id;
+  }, [messages.length, loading, group.id]);
+
+  useEffect(() => {
+    setActionError(null);
+  }, [group.id]);
+
+  const handleDelete = async (id: string) => {
+    if (deletingId) return;
+    if (!window.confirm("Supprimer ce message ?")) return;
+    setDeletingId(id);
+    setActionError(null);
+    const res = await remove(id);
+    setDeletingId(null);
+    if (res.error) setActionError(res.error);
+  };
+
+  return (
+    <section className="flex min-h-0 flex-1 flex-col bg-slate-50">
+      <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-3 py-3 sm:px-5">
+        <button
+          type="button"
+          onClick={onBack}
+          className="rounded-xl p-2 text-slate-600 transition hover:bg-slate-100 md:hidden"
+          aria-label="Retour à la liste des groupes"
+        >
+          <BackIcon />
+        </button>
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white">
+          <HashIcon width={20} height={20} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-base font-bold text-slate-900">{group.name}</h2>
+          <p className="flex items-center gap-1.5 text-xs text-slate-500">
+            <span
+              className={`inline-block h-2 w-2 rounded-full ${
+                connected ? "bg-emerald-500" : "animate-pulse bg-amber-400"
+              }`}
+            />
+            {connected ? "Temps réel actif" : "Connexion en cours…"}
+          </p>
+        </div>
+      </header>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-6" aria-live="polite">
+        {loading && messages.length === 0 && (
+          <div className="flex h-full items-center justify-center gap-2 text-sm text-slate-500">
+            <Spinner className="h-5 w-5 text-indigo-500" />
+            Chargement des messages…
+          </div>
+        )}
+
+        {error && (
+          <p role="alert" className="mx-auto max-w-md rounded-xl bg-red-50 px-4 py-3 text-center text-sm text-red-700">
+            {error}
+          </p>
+        )}
+
+        {!loading && !error && messages.length === 0 && (
+          <div className="flex h-full flex-col items-center justify-center text-center text-slate-500">
+            <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-600">
+              <ChatIcon width={28} height={28} />
+            </div>
+            <p className="font-semibold text-slate-700">Aucun message pour l'instant</p>
+            <p className="text-sm">Soyez le premier à écrire dans #{group.name} !</p>
+          </div>
+        )}
+
+        <ul className="mx-auto flex max-w-3xl flex-col">
+          {messages.map((m, i) => {
+            const mine = m.user_id === me.id;
+            const prev = messages[i - 1];
+            const newDay = !prev || dayKey(prev.created_at) !== dayKey(m.created_at);
+            const startsRun = newDay || prev.user_id !== m.user_id;
+
+            return (
+              <Fragment key={m.id}>
+                {newDay && (
+                  <li className="my-3 flex justify-center" aria-hidden="false">
+                    <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-medium text-slate-600 capitalize">
+                      {formatDay(m.created_at)}
+                    </span>
+                  </li>
+                )}
+                <li
+                  className={`group flex items-end gap-2 ${mine ? "flex-row-reverse" : "flex-row"} ${
+                    startsRun ? "mt-3" : "mt-1"
+                  }`}
+                >
+                  {!mine && (
+                    <div className="w-8 shrink-0">{startsRun && <Avatar name={m.username} size="sm" />}</div>
+                  )}
+
+                  <div className={`flex max-w-[80%] flex-col sm:max-w-[70%] ${mine ? "items-end" : "items-start"}`}>
+                    {!mine && startsRun && (
+                      <span className="mb-1 ml-1 text-xs font-semibold text-slate-600">{m.username}</span>
+                    )}
+                    <div className={`flex items-center gap-1 ${mine ? "flex-row-reverse" : "flex-row"}`}>
+                      {/* Texte rendu par React : toujours échappé, jamais de HTML brut */}
+                      <p
+                        className={`min-w-0 px-4 py-2 text-[15px] leading-relaxed break-words whitespace-pre-wrap shadow-sm ${
+                          mine
+                            ? "rounded-2xl rounded-br-md bg-indigo-600 text-white"
+                            : "rounded-2xl rounded-bl-md bg-white text-slate-800 ring-1 ring-slate-200"
+                        }`}
+                        style={{ overflowWrap: "anywhere" }}
+                      >
+                        {m.content}
+                      </p>
+                      {mine && (
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(m.id)}
+                          disabled={deletingId === m.id}
+                          className="shrink-0 rounded-lg p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600 focus:opacity-100 disabled:opacity-50 sm:opacity-0 sm:group-hover:opacity-100"
+                          aria-label="Supprimer mon message"
+                          title="Supprimer"
+                        >
+                          {deletingId === m.id ? (
+                            <Spinner className="h-4 w-4" />
+                          ) : (
+                            <TrashIcon width={16} height={16} />
+                          )}
+                        </button>
+                      )}
+                    </div>
+                    <time dateTime={m.created_at} className="mx-1 mt-0.5 text-[11px] text-slate-400">
+                      {formatTime(m.created_at)}
+                    </time>
+                  </div>
+                </li>
+              </Fragment>
+            );
+          })}
+        </ul>
+        <div ref={bottomRef} />
+      </div>
+
+      {actionError && (
+        <p role="alert" className="border-t border-red-200 bg-red-50 px-4 py-2 text-center text-sm text-red-700">
+          {actionError}
+        </p>
+      )}
+
+      <MessageInput groupId={group.id} groupName={group.name} onSend={send} />
+    </section>
+  );
+}
+
+
+
+================================================
+FILE: src/components/CreateGroupModal.tsx
+================================================
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { CloseIcon, Spinner } from "./Icons";
+
+interface Props {
+  onClose: () => void;
+  onCreate: (name: string) => Promise<{ error?: string }>;
+}
+
+export function CreateGroupModal({ onClose, onCreate }: Props) {
+  const [name, setName] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (submitting) return;
+    if (!name.trim()) {
+      setError("Saisissez un nom de groupe.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    const res = await onCreate(name);
+    setSubmitting(false);
+    if (res.error) setError(res.error);
+    else onClose();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 p-4 backdrop-blur-sm sm:items-center"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="create-group-title"
+    >
+      <form
+        onSubmit={handleSubmit}
+        className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl"
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h2 id="create-group-title" className="text-lg font-bold text-slate-900">
+            Nouveau groupe
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+            aria-label="Fermer"
+          >
+            <CloseIcon />
+          </button>
+        </div>
+
+        <label htmlFor="group-name" className="mb-1.5 block text-sm font-medium text-slate-700">
+          Nom du groupe
+        </label>
+        <input
+          id="group-name"
+          ref={inputRef}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          maxLength={40}
+          disabled={submitting}
+          placeholder="Ex. : Projet vacances"
+          className="w-full rounded-xl border border-slate-300 px-4 py-3 text-base outline-none transition focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100"
+        />
+
+        {error && (
+          <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </p>
+        )}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100"
+          >
+            Annuler
+          </button>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {submitting && <Spinner className="h-4 w-4" />}
+            Créer
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+
+
+================================================
+FILE: src/components/Icons.tsx
+================================================
+import type { SVGProps } from "react";
+
+type IconProps = SVGProps<SVGSVGElement>;
+
+const base: IconProps = {
+  width: 20,
+  height: 20,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  "aria-hidden": true,
+};
+
+export const SendIcon = (p: IconProps) => (
+  <svg {...base} {...p}>
+    <path d="M22 2 11 13" />
+    <path d="M22 2 15 22l-4-9-9-4 20-7z" />
+  </svg>
+);
+
+export const PlusIcon = (p: IconProps) => (
+  <svg {...base} {...p}>
+    <path d="M12 5v14M5 12h14" />
+  </svg>
+);
+
+export const BackIcon = (p: IconProps) => (
+  <svg {...base} {...p}>
+    <path d="m15 18-6-6 6-6" />
+  </svg>
+);
+
+export const TrashIcon = (p: IconProps) => (
+  <svg {...base} {...p}>
+    <path d="M3 6h18" />
+    <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+    <path d="m19 6-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+    <path d="M10 11v6M14 11v6" />
+  </svg>
+);
+
+export const LogoutIcon = (p: IconProps) => (
+  <svg {...base} {...p}>
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <path d="m16 17 5-5-5-5" />
+    <path d="M21 12H9" />
+  </svg>
+);
+
+export const HashIcon = (p: IconProps) => (
+  <svg {...base} {...p}>
+    <path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" />
+  </svg>
+);
+
+export const ChatIcon = (p: IconProps) => (
+  <svg {...base} {...p}>
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  </svg>
+);
+
+export const CloseIcon = (p: IconProps) => (
+  <svg {...base} {...p}>
+    <path d="M18 6 6 18M6 6l12 12" />
+  </svg>
+);
+
+export function Spinner({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      className={`animate-spin ${className}`}
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="4" />
+      <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+
+
+================================================
+FILE: src/components/MessageInput.tsx
+================================================
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { SendIcon, Spinner } from "./Icons";
+
+interface Props {
+  groupId: string;
+  groupName: string;
+  onSend: (content: string) => Promise<{ error?: string }>;
+}
+
+export function MessageInput({ groupId, groupName, onSend }: Props) {
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const lockRef = useRef(false); // protège contre le double envoi (avant re-render)
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Réinitialise la saisie quand on change de groupe
+  useEffect(() => {
+    setText("");
+    setError(null);
+  }, [groupId]);
+
+  // Hauteur auto du champ de saisie
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+  }, [text]);
+
+  const submit = async () => {
+    const content = text.trim();
+    if (!content || lockRef.current) return;
+
+    lockRef.current = true;
+    setSending(true);
+    setError(null);
+    const res = await onSend(content);
+    lockRef.current = false;
+    setSending(false);
+
+    if (res.error) {
+      setError(res.error);
+    } else {
+      setText("");
+    }
+    textareaRef.current?.focus();
+  };
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    void submit();
+  };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      void submit();
+    }
+  };
+
+  const canSend = text.trim().length > 0 && !sending;
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="border-t border-slate-200 bg-white p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4"
+    >
+      {error && (
+        <p role="alert" className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+      <div className="flex items-end gap-2">
+        <textarea
+          ref={textareaRef}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={handleKeyDown}
+          rows={1}
+          maxLength={2000}
+          placeholder={`Écrire dans #${groupName}…`}
+          aria-label="Votre message"
+          className="max-h-36 min-h-[46px] flex-1 resize-none rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-base text-slate-900 placeholder-slate-400 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-100"
+        />
+        <button
+          type="submit"
+          disabled={!canSend}
+          className="flex h-[46px] items-center gap-2 rounded-2xl bg-indigo-600 px-4 font-semibold text-white shadow-sm transition hover:bg-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:bg-slate-300 sm:px-5"
+        >
+          {sending ? <Spinner className="h-5 w-5" /> : <SendIcon width={18} height={18} />}
+          <span>Envoyer</span>
+        </button>
+      </div>
+    </form>
+  );
+}
+
+
+
+================================================
+FILE: src/components/SetupScreen.tsx
+================================================
+export function SetupScreen() {
+  return (
+    <div className="flex min-h-dvh items-center justify-center bg-slate-50 p-4">
+      <div className="w-full max-w-lg rounded-2xl bg-white p-8 shadow-xl ring-1 ring-slate-200">
+        <div className="mb-4 inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+          Configuration requise
+        </div>
+        <h1 className="text-2xl font-bold text-slate-900">Supabase n'est pas configuré</h1>
+        <p className="mt-3 text-slate-600">
+          Les variables d'environnement suivantes sont manquantes. Ajoutez-les dans un fichier{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 text-sm">.env</code> en local, ou dans
+          les variables d'environnement de Netlify, puis relancez l'application.
+        </p>
+        <pre className="mt-4 overflow-x-auto rounded-xl bg-slate-900 p-4 text-sm text-slate-100">
+{`VITE_SUPABASE_URL=https://votre-projet.supabase.co
+VITE_SUPABASE_ANON_KEY=votre-cle-anon-publique`}
+        </pre>
+        <p className="mt-4 text-sm text-slate-500">
+          Ces valeurs se trouvent dans Supabase : <strong>Project Settings → API</strong>. Utilisez
+          uniquement la clé <em>anon</em> (publique), jamais la clé <em>service_role</em>.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+
+
+================================================
+FILE: src/components/Sidebar.tsx
+================================================
+import { useState } from "react";
+import type { Group } from "../types";
+import { Avatar } from "./Avatar";
+import { CreateGroupModal } from "./CreateGroupModal";
+import { HashIcon, LogoutIcon, PlusIcon, Spinner } from "./Icons";
+
+interface Props {
+  groups: Group[];
+  loading: boolean;
+  error: string | null;
+  activeId: string | null;
+  username: string;
+  onSelect: (id: string) => void;
+  onCreate: (name: string) => Promise<{ group?: Group; error?: string }>;
+  onSignOut: () => void;
+  className?: string;
+}
+
+export function Sidebar({
+  groups,
+  loading,
+  error,
+  activeId,
+  username,
+  onSelect,
+  onCreate,
+  onSignOut,
+  className = "",
+}: Props) {
+  const [creating, setCreating] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
+  const handleCreate = async (name: string) => {
+    const res = await onCreate(name);
+    if (res.group) onSelect(res.group.id);
+    return { error: res.error };
+  };
+
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    await onSignOut();
+  };
+
+  return (
+    <aside className={`flex-col border-r border-slate-200 bg-white ${className}`}>
+      <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-4">
+        <h1 className="text-lg font-bold text-slate-900">Groupes</h1>
+        <button
+          type="button"
+          onClick={() => setCreating(true)}
+          className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-200"
+        >
+          <PlusIcon width={16} height={16} />
+          Nouveau
+        </button>
+      </div>
+
+      <nav className="flex-1 overflow-y-auto p-2" aria-label="Groupes de discussion">
+        {loading && (
+          <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-500">
+            <Spinner className="h-5 w-5 text-indigo-500" />
+            Chargement des groupes…
+          </div>
+        )}
+        {error && (
+          <p role="alert" className="m-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </p>
+        )}
+        {!loading && !error && groups.length === 0 && (
+          <p className="px-3 py-8 text-center text-sm text-slate-500">
+            Aucun groupe pour le moment. Créez le premier !
+          </p>
+        )}
+        <ul className="space-y-1">
+          {groups.map((g) => {
+            const active = g.id === activeId;
+            return (
+              <li key={g.id}>
+                <button
+                  type="button"
+                  onClick={() => onSelect(g.id)}
+                  aria-current={active ? "true" : undefined}
+                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition ${
+                    active
+                      ? "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200"
+                      : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  <span
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+                      active ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-500"
+                    }`}
+                  >
+                    <HashIcon width={18} height={18} />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate font-medium">{g.name}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
+
+      <div className="flex items-center gap-3 border-t border-slate-200 p-3">
+        <Avatar name={username} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-slate-900">{username}</p>
+          <p className="text-xs text-emerald-600">Connecté</p>
+        </div>
+        <button
+          type="button"
+          onClick={handleSignOut}
+          disabled={signingOut}
+          className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-60"
+          title="Se déconnecter"
+        >
+          {signingOut ? <Spinner className="h-4 w-4" /> : <LogoutIcon width={18} height={18} />}
+          <span>Déconnexion</span>
+        </button>
+      </div>
+
+      {creating && <CreateGroupModal onClose={() => setCreating(false)} onCreate={handleCreate} />}
+    </aside>
+  );
+}
+
+
+
+================================================
+FILE: src/context/AuthContext.tsx
+================================================
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+import type { Session, User } from "@supabase/supabase-js";
+import { supabase } from "../lib/supabase";
+import { translateAuthError } from "../lib/errors";
+
+interface SignUpResult {
+  error?: string;
+  needsConfirmation?: boolean;
+}
+
+interface AuthContextValue {
+  session: Session | null;
+  user: User | null;
+  username: string;
+  loading: boolean;
+  signIn: (email: string, password: string) => Promise<{ error?: string }>;
+  signUp: (email: string, password: string, username: string) => Promise<SignUpResult>;
+  signOut: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [profileName, setProfileName] = useState<string | null>(null);
+
+  // Session initiale + écoute des changements d'état d'authentification
+  useEffect(() => {
+    let active = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      setSession(data.session);
+      setLoading(false);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+      setLoading(false);
+    });
+
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  const userId = session?.user.id ?? null;
+
+  // Récupération du pseudo depuis la table profiles
+  useEffect(() => {
+    if (!userId) {
+      setProfileName(null);
+      return;
+    }
+    let active = true;
+    supabase
+      .from("profiles")
+      .select("username")
+      .eq("id", userId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (active && data?.username) setProfileName(data.username as string);
+      });
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+
+  const signIn = useCallback(async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+    if (error) return { error: translateAuthError(error) };
+    return {};
+  }, []);
+
+  const signUp = useCallback(
+    async (email: string, password: string, username: string): Promise<SignUpResult> => {
+      const cleanName = username.trim();
+
+      // Vérification préalable (facultative) de l'unicité du pseudo
+      const { data: available, error: rpcError } = await supabase.rpc("is_username_available", {
+        p_username: cleanName,
+      });
+      if (!rpcError && available === false) {
+        return { error: "Ce pseudo est déjà utilisé. Choisissez-en un autre." };
+      }
+
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: { data: { username: cleanName } },
+      });
+
+      if (error) return { error: translateAuthError(error) };
+
+      // Avec la confirmation email activée, Supabase renvoie un utilisateur
+      // sans identité quand l'adresse existe déjà (anti-énumération).
+      if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+        return {
+          error: "Cette adresse email est déjà utilisée. Connectez-vous ou utilisez une autre adresse.",
+        };
+      }
+
+      // Pas de session = confirmation par email requise
+      if (!data.session) return { needsConfirmation: true };
+
+      return {};
+    },
+    []
+  );
+
+  const signOut = useCallback(async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+  }, []);
+
+  const value = useMemo<AuthContextValue>(() => {
+    const user = session?.user ?? null;
+    const metaName =
+      typeof user?.user_metadata?.username === "string" ? (user.user_metadata.username as string) : "";
+    return {
+      session,
+      user,
+      username: profileName ?? (metaName || "Moi"),
+      loading,
+      signIn,
+      signUp,
+      signOut,
+    };
+  }, [session, profileName, loading, signIn, signUp, signOut]);
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function useAuth(): AuthContextValue {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth doit être utilisé dans un AuthProvider");
+  return ctx;
+}
+
+
+
+================================================
+FILE: src/hooks/useGroups.ts
+================================================
+import { useCallback, useEffect, useState } from "react";
+import { supabase } from "../lib/supabase";
+import { translateDbError } from "../lib/errors";
+import type { Group } from "../types";
+
+function sortGroups(list: Group[]): Group[] {
+  return [...list].sort(
+    (a, b) => Date.parse(a.created_at) - Date.parse(b.created_at)
+  );
+}
+
+function upsertGroup(list: Group[], group: Group): Group[] {
+  if (list.some((g) => g.id === group.id)) return list;
+  return sortGroups([...list, group]);
+}
+
+export function useGroups(userId: string) {
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async (initial: boolean) => {
+      const { data, error: err } = await supabase
+        .from("groups")
+        .select("id, name, created_by, created_at")
+        .order("created_at", { ascending: true });
+      if (cancelled) return;
+      if (err) {
+        if (initial) setError(translateDbError(err));
+      } else {
+        setError(null);
+        setGroups((prev) => {
+          let merged = sortGroups((data ?? []) as Group[]);
+          for (const g of prev) merged = upsertGroup(merged, g);
+          return merged;
+        });
+      }
+      if (initial) setLoading(false);
+    };
+
+    load(true);
+
+    // Les nouveaux groupes apparaissent en direct chez tous les membres
+    const channel = supabase
+      .channel(`groups:${crypto.randomUUID()}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "groups" },
+        (payload) => {
+          const g = payload.new as Group;
+          setGroups((prev) => upsertGroup(prev, g));
+        }
+      )
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") load(false);
+      });
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [userId]);
+
+  const createGroup = useCallback(
+    async (name: string): Promise<{ group?: Group; error?: string }> => {
+      const clean = name.trim().replace(/\s+/g, " ");
+      if (!clean) return { error: "Le nom du groupe ne peut pas être vide." };
+      if (clean.length > 40) return { error: "Le nom du groupe est trop long (40 caractères maximum)." };
+
+      const { data, error: err } = await supabase
+        .from("groups")
+        .insert({ name: clean, created_by: userId })
+        .select("id, name, created_by, created_at")
+        .single();
+
+      if (err || !data) return { error: translateDbError(err) };
+      const group = data as Group;
+      setGroups((prev) => upsertGroup(prev, group));
+      return { group };
+    },
+    [userId]
+  );
+
+  return { groups, loading, error, createGroup };
+}
+
+
+
+================================================
+FILE: src/hooks/useMessages.ts
+================================================
+import { useCallback, useEffect, useRef, useState } from "react";
+import { supabase } from "../lib/supabase";
+import { translateDbError } from "../lib/errors";
+import type { Message, RawMessage } from "../types";
+
+const HISTORY_LIMIT = 200;
+const SELECT_WITH_AUTHOR = "id, group_id, user_id, content, created_at, profiles(username)";
+const UNKNOWN_USER = "Utilisateur";
+
+function normalize(raw: RawMessage): Message {
+  const p = Array.isArray(raw.profiles) ? raw.profiles[0] : raw.profiles;
+  return {
+    id: raw.id,
+    group_id: raw.group_id,
+    user_id: raw.user_id,
+    content: raw.content,
+    created_at: raw.created_at,
+    username: p?.username ?? UNKNOWN_USER,
+  };
+}
+
+function byDate(a: Message, b: Message): number {
+  return Date.parse(a.created_at) - Date.parse(b.created_at);
+}
+
+/** Ajoute un message sans doublon (clé : id) et garde l'ordre chronologique. */
+function addUnique(list: Message[], msg: Message): Message[] {
+  if (list.some((m) => m.id === msg.id)) return list;
+  return [...list, msg].sort(byDate);
+}
+
+/**
+ * Fusionne l'historique chargé (source de vérité) avec l'état local :
+ * on garde uniquement les messages locaux plus récents que le dernier
+ * message chargé (arrivés en temps réel pendant la requête).
+ */
+function mergeHistory(local: Message[], fetched: Message[]): Message[] {
+  const ids = new Set(fetched.map((m) => m.id));
+  const newest = fetched.length ? Date.parse(fetched[fetched.length - 1].created_at) : 0;
+  const extras = local.filter((m) => !ids.has(m.id) && Date.parse(m.created_at) > newest);
+  return [...fetched, ...extras].sort(byDate);
+}
+
+export function useMessages(groupId: string | null, me: { id: string; username: string }) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [connected, setConnected] = useState(false);
+
+  const meRef = useRef(me);
+  useEffect(() => {
+    meRef.current = me;
+  }, [me]);
+
+  useEffect(() => {
+    setMessages([]);
+    setError(null);
+    setConnected(false);
+
+    if (!groupId) {
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+
+    // Cache pseudo par user_id pour les messages reçus en temps réel
+    const names = new Map<string, string>([[meRef.current.id, meRef.current.username]]);
+
+    const fetchHistory = async (initial: boolean) => {
+      const { data, error: err } = await supabase
+        .from("messages")
+        .select(SELECT_WITH_AUTHOR)
+        .eq("group_id", groupId)
+        .order("created_at", { ascending: false })
+        .limit(HISTORY_LIMIT);
+
+      if (cancelled) return;
+
+      if (err) {
+        if (initial) setError(translateDbError(err));
+        setLoading(false);
+        return;
+      }
+
+      const fetched = ((data ?? []) as unknown as RawMessage[]).map(normalize).reverse();
+      for (const m of fetched) names.set(m.user_id, m.username);
+      setError(null);
+      setMessages((prev) => mergeHistory(prev, fetched));
+      setLoading(false);
+    };
+
+    const resolveUsername = async (userId: string): Promise<string> => {
+      const cached = names.get(userId);
+      if (cached) return cached;
+      const { data } = await supabase
+        .from("profiles")
+        .select("username")
+        .eq("id", userId)
+        .maybeSingle();
+      const name = (data?.username as string | undefined) ?? UNKNOWN_USER;
+      names.set(userId, name);
+      return name;
+    };
+
+    fetchHistory(true);
+
+    const channel = supabase
+      .channel(`messages:${groupId}:${crypto.randomUUID()}`)
+      // Nouveaux messages du groupe courant (filtre côté serveur)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages", filter: `group_id=eq.${groupId}` },
+        async (payload) => {
+          const row = payload.new as Omit<RawMessage, "profiles">;
+          const username = await resolveUsername(row.user_id);
+          if (cancelled) return;
+          setMessages((prev) => addUnique(prev, { ...row, username }));
+        }
+      )
+      // Supprimations : Supabase ne permet pas de filtrer les DELETE par colonne
+      // (seule la clé primaire est fournie). On retire donc simplement l'id
+      // s'il est présent dans la liste courante.
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "messages" },
+        (payload) => {
+          const id = (payload.old as { id?: string }).id;
+          if (!id) return;
+          setMessages((prev) => (prev.some((m) => m.id === id) ? prev.filter((m) => m.id !== id) : prev));
+        }
+      )
+      .subscribe((status) => {
+        if (cancelled) return;
+        if (status === "SUBSCRIBED") {
+          setConnected(true);
+          // Rattrape les éventuels messages manqués (connexion initiale ou reconnexion)
+          fetchHistory(false);
+        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          setConnected(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [groupId, me.id]);
+
+  const send = useCallback(
+    async (content: string): Promise<{ error?: string }> => {
+      const text = content.trim();
+      if (!groupId) return { error: "Aucun groupe sélectionné." };
+      if (!text) return { error: "Le message est vide." };
+
+      const current = meRef.current;
+      const { data, error: err } = await supabase
+        .from("messages")
+        .insert({ group_id: groupId, user_id: current.id, content: text })
+        .select("id, group_id, user_id, content, created_at")
+        .single();
+
+      if (err || !data) return { error: translateDbError(err) };
+
+      // Affichage immédiat ; l'évènement temps réel du même message sera ignoré (même id)
+      setMessages((prev) => addUnique(prev, { ...(data as Omit<RawMessage, "profiles">), username: current.username }));
+      return {};
+    },
+    [groupId]
+  );
+
+  const remove = useCallback(async (id: string): Promise<{ error?: string }> => {
+    const { error: err } = await supabase.from("messages").delete().eq("id", id);
+    if (err) return { error: translateDbError(err) };
+    setMessages((prev) => prev.filter((m) => m.id !== id));
+    return {};
+  }, []);
+
+  return { messages, loading, error, connected, send, remove };
+}
+
+
+
+================================================
+FILE: src/lib/errors.ts
+================================================
+interface ErrorLike {
+  message?: string;
+  code?: string;
+  status?: number;
+}
+
+/** Traduit une erreur Supabase Auth en message français lisible. */
+export function translateAuthError(error: ErrorLike | null | undefined): string {
+  if (!error) return "Une erreur inconnue est survenue.";
+  const msg = (error.message ?? "").toLowerCase();
+  const code = (error.code ?? "").toLowerCase();
+
+  if (code === "invalid_credentials" || msg.includes("invalid login credentials")) {
+    return "Email ou mot de passe incorrect.";
+  }
+  if (code === "email_not_confirmed" || msg.includes("email not confirmed")) {
+    return "Votre email n'est pas encore confirmé. Vérifiez votre boîte mail (et vos spams) puis cliquez sur le lien reçu.";
+  }
+  if (
+    code === "user_already_exists" ||
+    code === "email_exists" ||
+    msg.includes("already registered") ||
+    msg.includes("already been registered")
+  ) {
+    return "Cette adresse email est déjà utilisée. Connectez-vous ou utilisez une autre adresse.";
+  }
+  if (code === "weak_password" || msg.includes("password should be at least") || msg.includes("weak password")) {
+    return "Mot de passe trop court ou trop faible : 6 caractères minimum.";
+  }
+  if (code === "validation_failed" || msg.includes("unable to validate email") || msg.includes("invalid email")) {
+    return "Adresse email invalide.";
+  }
+  if (msg.includes("database error saving new user")) {
+    return "Impossible de créer le compte : ce pseudo est probablement déjà utilisé ou invalide.";
+  }
+  if (code === "over_email_send_rate_limit" || msg.includes("rate limit") || error.status === 429) {
+    return "Trop de tentatives. Patientez quelques instants avant de réessayer.";
+  }
+  if (code === "signup_disabled" || msg.includes("signups not allowed")) {
+    return "Les inscriptions sont désactivées pour le moment.";
+  }
+  if (msg.includes("failed to fetch") || msg.includes("networkerror") || msg.includes("network request failed")) {
+    return "Connexion impossible au serveur. Vérifiez votre connexion internet.";
+  }
+  return "Une erreur est survenue. Veuillez réessayer.";
+}
+
+/** Traduit une erreur PostgREST / base de données en message français. */
+export function translateDbError(error: ErrorLike | null | undefined): string {
+  if (!error) return "Une erreur inconnue est survenue.";
+  const msg = (error.message ?? "").toLowerCase();
+
+  if (error.code === "23505" || msg.includes("duplicate key")) {
+    return "Un groupe porte déjà ce nom.";
+  }
+  if (error.code === "42501" || msg.includes("row-level security")) {
+    return "Action non autorisée.";
+  }
+  if (error.code === "23514") {
+    return "Contenu invalide (trop long ou vide).";
+  }
+  if (msg.includes("failed to fetch") || msg.includes("networkerror")) {
+    return "Connexion impossible au serveur. Vérifiez votre connexion internet.";
+  }
+  return "Une erreur est survenue. Veuillez réessayer.";
+}
+
+
+
+================================================
+FILE: src/lib/format.ts
+================================================
+export function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString("fr-FR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function dayKey(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+export function formatDay(iso: string): string {
+  const d = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  if (dayKey(iso) === dayKey(today.toISOString())) return "Aujourd'hui";
+  if (dayKey(iso) === dayKey(yesterday.toISOString())) return "Hier";
+
+  return d.toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: d.getFullYear() === today.getFullYear() ? undefined : "numeric",
+  });
+}
+
+const AVATAR_COLORS = [
+  "bg-indigo-500",
+  "bg-violet-500",
+  "bg-rose-500",
+  "bg-amber-500",
+  "bg-emerald-500",
+  "bg-sky-500",
+  "bg-fuchsia-500",
+  "bg-teal-500",
+];
+
+export function avatarColor(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
+
+
+
+================================================
+FILE: src/lib/supabase.ts
+================================================
+import { createClient } from "@supabase/supabase-js";
+
+const url = (import.meta.env.VITE_SUPABASE_URL ?? "").trim();
+const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? "").trim();
+
+export const isSupabaseConfigured = Boolean(url && anonKey);
+
+// Seules l'URL du projet et la clé publique "anon" sont utilisées ici.
+// Si la configuration est absente, l'application affiche un écran d'aide
+// avant toute requête (les valeurs de remplacement ne sont jamais utilisées).
+export const supabase = createClient(
+  isSupabaseConfigured ? url : "http://localhost:54321",
+  isSupabaseConfigured ? anonKey : "missing-anon-key",
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  }
+);
+
+
+
+================================================
+FILE: src/utils/cn.ts
+================================================
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+
+
+================================================
+FILE: supabase/schema.sql
+================================================
+-- =====================================================================
+--  Messagerie de groupe temps réel — Schéma Supabase complet
+--  À coller et exécuter en une seule fois dans :
+--  Supabase > SQL Editor > New query > Run
+--  Le script est idempotent : on peut le relancer sans risque.
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- 1. TABLES
+-- ---------------------------------------------------------------------
+
+-- Profils : une ligne par utilisateur inscrit (liée à auth.users)
+create table if not exists public.profiles (
+  id          uuid primary key references auth.users (id) on delete cascade,
+  username    text not null unique,
+  created_at  timestamptz not null default now(),
+  constraint profiles_username_length check (char_length(btrim(username)) between 3 and 20)
+);
+
+-- Pseudo unique sans tenir compte de la casse (« Marie » = « marie »)
+create unique index if not exists profiles_username_lower_idx
+  on public.profiles (lower(username));
+
+-- Groupes de discussion
+-- created_by est nullable pour permettre le groupe par défaut « Général »
+create table if not exists public.groups (
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null,
+  created_by  uuid references public.profiles (id) on delete set null,
+  created_at  timestamptz not null default now(),
+  constraint groups_name_length check (char_length(btrim(name)) between 1 and 40)
+);
+
+-- Nom de groupe unique sans tenir compte de la casse
+create unique index if not exists groups_name_lower_idx
+  on public.groups (lower(name));
+
+-- Messages
+create table if not exists public.messages (
+  id          uuid primary key default gen_random_uuid(),
+  group_id    uuid not null references public.groups (id) on delete cascade,
+  user_id     uuid not null references public.profiles (id) on delete cascade,
+  content     text not null,
+  created_at  timestamptz not null default now(),
+  constraint messages_content_length check (
+    char_length(btrim(content)) between 1 and 2000
+  )
+);
+
+create index if not exists messages_group_created_idx
+  on public.messages (group_id, created_at);
+
+-- ---------------------------------------------------------------------
+-- 2. TRIGGER : création automatique du profil à l'inscription
+-- ---------------------------------------------------------------------
+
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_username text;
+begin
+  -- Le pseudo est transmis par le frontend dans les métadonnées du signUp
+  v_username := nullif(btrim(new.raw_user_meta_data ->> 'username'), '');
+
+  -- Filet de sécurité si aucun pseudo n'est fourni
+  if v_username is null then
+    v_username := 'user_' || substr(replace(new.id::text, '-', ''), 1, 8);
+  end if;
+
+  insert into public.profiles (id, username)
+  values (new.id, v_username);
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- ---------------------------------------------------------------------
+-- 3. FONCTION : vérifier la disponibilité d'un pseudo avant l'inscription
+--    (renvoie uniquement true/false, n'expose aucune donnée de profil)
+--    Optionnelle : si vous la supprimez, l'inscription fonctionne quand
+--    même, l'unicité restant garantie par la base.
+-- ---------------------------------------------------------------------
+
+create or replace function public.is_username_available(p_username text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select not exists (
+    select 1 from public.profiles
+    where lower(username) = lower(btrim(p_username))
+  );
+$$;
+
+revoke all on function public.is_username_available(text) from public;
+grant execute on function public.is_username_available(text) to anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- 4. ROW LEVEL SECURITY
+-- ---------------------------------------------------------------------
+
+alter table public.profiles enable row level security;
+alter table public.groups   enable row level security;
+alter table public.messages enable row level security;
+
+-- On force aussi le RLS pour le propriétaire des tables
+alter table public.profiles force row level security;
+alter table public.groups   force row level security;
+alter table public.messages force row level security;
+
+-- Privilèges SQL : rien pour anon, le strict nécessaire pour authenticated
+revoke all on public.profiles from anon, authenticated;
+revoke all on public.groups   from anon, authenticated;
+revoke all on public.messages from anon, authenticated;
+
+grant select         on public.profiles to authenticated;
+grant select, insert on public.groups   to authenticated;
+grant select, insert, delete on public.messages to authenticated;
+
+-- ----- profiles -----
+drop policy if exists "profiles_select_authenticated" on public.profiles;
+create policy "profiles_select_authenticated"
+  on public.profiles for select
+  to authenticated
+  using (true);
+
+-- ----- groups -----
+drop policy if exists "groups_select_authenticated" on public.groups;
+create policy "groups_select_authenticated"
+  on public.groups for select
+  to authenticated
+  using (true);
+
+drop policy if exists "groups_insert_authenticated" on public.groups;
+create policy "groups_insert_authenticated"
+  on public.groups for insert
+  to authenticated
+  with check (auth.uid() = created_by);
+
+-- ----- messages -----
+drop policy if exists "messages_select_authenticated" on public.messages;
+create policy "messages_select_authenticated"
+  on public.messages for select
+  to authenticated
+  using (true);
+
+drop policy if exists "messages_insert_own" on public.messages;
+create policy "messages_insert_own"
+  on public.messages for insert
+  to authenticated
+  with check (auth.uid() = user_id);
+
+drop policy if exists "messages_delete_own" on public.messages;
+create policy "messages_delete_own"
+  on public.messages for delete
+  to authenticated
+  using (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------------
+-- 5. REALTIME
+-- ---------------------------------------------------------------------
+
+-- Table messages (obligatoire)
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'messages'
+  ) then
+    alter publication supabase_realtime add table public.messages;
+  end if;
+end $$;
+
+-- Table groups (bonus : les nouveaux groupes apparaissent chez tout le monde)
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'groups'
+  ) then
+    alter publication supabase_realtime add table public.groups;
+  end if;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- 6. GROUPE PAR DÉFAUT
+-- ---------------------------------------------------------------------
+
+insert into public.groups (name, created_by)
+values ('Général', null)
+on conflict do nothing;
+
+

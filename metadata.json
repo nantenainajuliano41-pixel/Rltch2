@@ -1,0 +1,6 @@
+{
+  "name": "Messagerie privée en temps réel",
+  "description": "Application de discussion individuelle en temps réel avec recherche de pseudo, pack Noto Color Emoji et sécurité renforcée.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
